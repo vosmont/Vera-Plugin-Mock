@@ -1,22 +1,27 @@
 package.path = "../?.lua;" .. package.path
 
+local _verbosity = 1
+
 local VeraMock = require("core.vera")
-require("lib.luaunit")
+local LuaUnit = require("lib.luaunit")
 
 -- Devices initialisation
-VeraMock.add_device(1, {description="Device1"})
-VeraMock.add_device(2, {description="Device2"})
-VeraMock.add_device(4, {description="Device3"}) 
+VeraMock:addDevice(1, {description="Device1"})
+VeraMock:addDevice(2, {description="Device2"})
+VeraMock:addDevice(4, {description="Device3"}) 
 
 TestCoreVera = {}
 
 	function TestCoreVera:setUp()
-		--print("==>")
+		if (_verbosity > 0) then
+			print("-------> Begin of TestCase")
+		end
 	end
 
 	function TestCoreVera:tearDown()
-		--print("<==")
-		print("")
+		if (_verbosity > 0) then
+			io.stdout:write("<------- End of TestCase : ")
+		end
 	end
 
 	-- ****************************************************************************************
@@ -38,7 +43,7 @@ TestCoreVera = {}
 
 	function TestCoreVera:test_variable_watch()
 		expect(3)
-		VeraMock.resetValues()
+		VeraMock:resetValues()
 		luup.variable_watch(
 			wrapAnonymousCallback(function (lul_device, lul_service, lul_variable, lul_value_old, lul_value_new)
 				assertEquals(lul_value_new, "MyNewValueDevice1", "Variable has changed for first device (first watcher)")
@@ -79,7 +84,7 @@ TestCoreVera = {}
 			end),
 			1, "myData2"
 		)
-		VeraMock.run()
+		VeraMock:run()
 	end
 
 	-- ****************************************************************************************
@@ -87,7 +92,7 @@ TestCoreVera = {}
 	-- ****************************************************************************************
 
 	function TestCoreVera:test_inet_wget_ok()
-		VeraMock.add_url("http://localhost/myUrl", "MyResponse")
+		VeraMock:addUrl("http://localhost/myUrl", "MyResponse")
 		local res, response = luup.inet.wget("http://localhost/myUrl")
 		assertEquals(res, 0, "The URL returns a response")
 		assertEquals(response, "MyResponse", "The response is correct")
@@ -104,7 +109,7 @@ TestCoreVera = {}
 	-- ****************************************************************************************
 
 	function TestCoreVera:test_call_action_ok()
-		VeraMock.add_action(
+		VeraMock:addAction(
 			"urn:upnp-org:serviceId:Service1", "Action1",
 			function (arguments, device)
 				if (arguments.newValue ~= nil) then
@@ -124,4 +129,6 @@ TestCoreVera = {}
 	end
 
 -- run all tests
+VeraMock:setVerbosity(_verbosity)
+LuaUnit:setVerbosity(_verbosity)
 LuaUnit:run()
