@@ -1,11 +1,12 @@
-package.path = "../?.lua;" .. package.path
+package.path = "./lib/?.lua;../?.lua;" .. package.path
+
 local VeraMock = require("core.vera")
 
 -- Declare your devices
 VeraMock:addDevice(1, {description="Device1"})
 
 -- ------------------------------------------------------
--- Begin of your script
+-- Begin of your script to test
 -- ------------------------------------------------------
 
 function myWatcherFunction(lul_device, lul_service, lul_variable, lul_value_old, lul_value_new)
@@ -17,7 +18,7 @@ luup.variable_watch("myWatcherFunction", "urn:upnp-org:serviceId:Service1", "Var
 luup.variable_set("urn:upnp-org:serviceId:Service1", "Variable1", "MyNewValue1", 1)
 
 -- ------------------------------------------------------
--- End of your script
+-- End of your script to test
 -- ------------------------------------------------------
 
 -- Run the mock until all events are processed
