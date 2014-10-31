@@ -1,9 +1,9 @@
-package.path = "../?.lua;" .. package.path
+package.path = "./lib/?.lua;../?.lua;" .. package.path
 
-local _verbosity = 1
+local _verbosity = 4
 
+local LuaUnit = require("luaunit")
 local VeraMock = require("core.vera")
-local LuaUnit = require("lib.luaunit")
 
 -- Devices initialisation
 VeraMock:addDevice(1, {description="Device1"})
@@ -14,13 +14,14 @@ TestCoreVera = {}
 
 	function TestCoreVera:setUp()
 		if (_verbosity > 0) then
-			print("-------> Begin of TestCase")
+			print("\n-------> Begin of TestCase")
 		end
+		VeraMock:reset()
 	end
 
 	function TestCoreVera:tearDown()
 		if (_verbosity > 0) then
-			io.stdout:write("<------- End of TestCase : ")
+			print("<------- End of TestCase")
 		end
 	end
 
@@ -43,7 +44,6 @@ TestCoreVera = {}
 
 	function TestCoreVera:test_variable_watch()
 		expect(3)
-		VeraMock:resetValues()
 		luup.variable_watch(
 			wrapAnonymousCallback(function (lul_device, lul_service, lul_variable, lul_value_old, lul_value_new)
 				assertEquals(lul_value_new, "MyNewValueDevice1", "Variable has changed for first device (first watcher)")
@@ -71,16 +71,19 @@ TestCoreVera = {}
 	-- ****************************************************************************************
 
 	function TestCoreVera:test_call_delay()
-		expect(2)
+		expect(4)
+		local startTime = os.time()
 		luup.call_delay(
 			wrapAnonymousCallback(function (data)
 				assertEquals(data, "myData1", "First function called correctly")
+				assertEquals(os.difftime(os.time() - startTime), 2, "First function is called 2 seconds later")
 			end),
 			2, "myData1"
 		)
 		luup.call_delay(
 			wrapAnonymousCallback(function (data)
 				assertEquals(data, "myData2", "Second function called correctly")
+				assertEquals(os.difftime(os.time() - startTime), 1, "Second function is called 1 second later")
 			end),
 			1, "myData2"
 		)
@@ -102,6 +105,45 @@ TestCoreVera = {}
 		local res, response = luup.inet.wget("http://localhost/unknownUrl")
 		assertEquals(res, 404, "The URL is not found")
 		assertEquals(response, "Not found", "The error message is correct")
+	end
+
+	function TestCoreVera:test_inet_wget_with_callback()
+		VeraMock:addUrl(
+			"http://localhost/myUrlWithCallback",
+			function ()
+				return 0, "myResponseWithCallback"
+			end
+		)
+		local res, response = luup.inet.wget("http://localhost/myUrlWithCallback")
+		assertEquals(res, 0, "The URL returns a response")
+		assertEquals(response, "myResponseWithCallback", "The response is correct")
+	end
+
+	function TestCoreVera:test_inet_wget_with_callback_and_request()
+		VeraMock:addUrl(
+			"http://localhost/myUrlWithCallback",
+			function (requestUrl)
+				return 0, "myResponseWithCallback-"..requestUrl
+			end
+		)
+		local res1, response1 = luup.inet.wget("http://localhost/myUrlWithCallback?param=value1")
+		assertEquals(res1, 0, "The URL returns a response")
+		assertEquals(response1, "myResponseWithCallback-param=value1", "The response is correct with first request")
+		local res2, response2 = luup.inet.wget("http://localhost/myUrlWithCallback?param=value2")
+		assertEquals(res2, 0, "The URL returns a response")
+		assertEquals(response2, "myResponseWithCallback-param=value2", "The response is correct with second request")
+	end
+
+	function TestCoreVera:test_inet_wget_with_callback_and_error()
+		VeraMock:addUrl(
+			"http://localhost/myUrlWithCallbackAndError",
+			function (requestUrl)
+				return 404, "myResponseWithCallbackAndError-"..requestUrl
+			end
+		)
+		local res, response = luup.inet.wget("http://localhost/myUrlWithCallbackAndError?param=value")
+		assertEquals(res, 404, "The URL returns an error")
+		assertEquals(response, "myResponseWithCallbackAndError-param=value", "The response is correct")
 	end
 
 	-- ****************************************************************************************
