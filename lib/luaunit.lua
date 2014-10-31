@@ -11,7 +11,7 @@ License: X11 License, see LICENSE.txt
 
 Changes between 2.2 and 2.1 (vosmont):
 - add message in assertEquals
-- add expect method
+- add expect and getExpect methods
 - add assertFalse and assertTrue methods
 - add some logs
 
@@ -199,11 +199,27 @@ end
 
 -- ASSERT FUNCTIONS ------------------------------------------------------------
 --
+
+local function countAndDisplayAssertion(msg)
+	UnitResult.currentAssertionCount = UnitResult.currentAssertionCount + 1
+	if UnitResult.verbosity > 0 then
+		if (type(msg) == "string") then
+			print("[LuaUnit] Assert#" .. tostring(UnitResult.currentAssertionCount) .. ": " .. msg)
+		else
+			print("[LuaUnit] Assert#" .. tostring(UnitResult.currentAssertionCount))
+		end
+	end
+end
+
 function expect (nb)
 	UnitResult.currentExpectedAssertionCount = nb
 	if UnitResult.verbosity > 0 then
 		print("[LuaUnit] Expects " .. tostring(UnitResult.currentExpectedAssertionCount) .. " assertion(s)")
 	end
+end
+
+function getExpect ()
+	return UnitResult.currentExpectedAssertionCount or 0
 end
 
 function assertError(f, ...)
@@ -220,15 +236,8 @@ function assertEquals(actual, expected, msg)
 	if not USE_EXPECTED_ACTUAL_IN_ASSERT_EQUALS then
 		expected, actual = actual, expected
 	end
-
-	UnitResult.currentAssertionCount = UnitResult.currentAssertionCount + 1
-	if UnitResult.verbosity > 0 then
-		if (type(msg) == "string") then
-			print("[LuaUnit] Assert#" .. tostring(UnitResult.currentAssertionCount) .. ": " .. msg)
-		else
-			print("[LuaUnit] Assert#" .. tostring(UnitResult.currentAssertionCount))
-		end
-	end
+--print("expected: "..tostring(expected)..", actual: "..tostring(actual))
+	countAndDisplayAssertion(msg)
 
 	if "table" == type(actual) then
 		if not deepCompare(actual, expected, true) then
@@ -270,6 +279,7 @@ for _, typename in ipairs(typenames) do
 	local tName = typename:lower()
 	local assert_typename = "assert"..typename
 	_G[assert_typename] = function(actual, msg)
+		countAndDisplayAssertion(msg)
 		local actualtype = type(actual)
 		if actualtype ~= tName then
 			local errorMsg = tName.." expected but was a "..actualtype
@@ -290,6 +300,7 @@ for _, typename in ipairs(typenames) do
 	local tName = typename:lower()
 	local assert_not_typename = "assertNot"..typename
 	_G[assert_not_typename] = function(actual, msg)
+		countAndDisplayAssertion(msg)
 		if type(actual) == tName then
 			local errorMsg = tName.." not expected but was one"
 			if msg then 
@@ -513,7 +524,8 @@ local LuaUnit = {
 			errorMsg  = self.strip_luaunit_stack(errorMsg)
 			LuaUnit.result:addFailure( errorMsg )
 		elseif ((self.result.currentExpectedAssertionCount > -1) and (self.result.currentAssertionCount ~= self.result.currentExpectedAssertionCount)) then
-			LuaUnit.result:addFailure( "Number of expected assertion is not reached" )
+			LuaUnit.result:addFailure( "Number of expected assertions is not reached"
+									.." (expected: "..tostring(self.result.currentExpectedAssertionCount)..", actual: " .. tostring(self.result.currentAssertionCount)..")")
 		end
 
 		-- lastly, run tearDown(if any)
