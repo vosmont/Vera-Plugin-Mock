@@ -523,9 +523,14 @@ local LuaUnit = {
 		if not ok then
 			errorMsg  = self.strip_luaunit_stack(errorMsg)
 			LuaUnit.result:addFailure( errorMsg )
-		elseif ((self.result.currentExpectedAssertionCount > -1) and (self.result.currentAssertionCount ~= self.result.currentExpectedAssertionCount)) then
-			LuaUnit.result:addFailure( "Number of expected assertions is not reached"
-									.." (expected: "..tostring(self.result.currentExpectedAssertionCount)..", actual: " .. tostring(self.result.currentAssertionCount)..")")
+		elseif (self.result.currentExpectedAssertionCount > -1) then
+			if UnitResult.verbosity > 0 then
+				print("[LuaUnit] Assert#END: Number of expected assertions is reached")
+			end
+			if (self.result.currentAssertionCount ~= self.result.currentExpectedAssertionCount) then
+				LuaUnit.result:addFailure( "Number of expected assertions is not reached"
+										.." (expected: "..tostring(self.result.currentExpectedAssertionCount)..", actual: " .. tostring(self.result.currentAssertionCount)..")")
+			end
 		end
 
 		-- lastly, run tearDown(if any)

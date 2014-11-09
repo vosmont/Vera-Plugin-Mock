@@ -9,6 +9,7 @@
 -- Homepage : https://github.com/vosmont/Vera-Plugin-Mock
 -- ------------------------------------------------------------
 -- Changelog :
+-- 0.0.7 Add "luup.call_timer"
 -- 0.0.6 Add some service actions
 --       Add response callback for luup.inet.wget
 --       Add threadId and timestamps in log
@@ -135,8 +136,25 @@ local luup = {
 		return true
 	end
 
-	luup.call_timer = function (function_name, type, time, days, data)
-		VeraMock:log("CORE  [luup.call_timer] Not implemented", 4)
+	luup.call_timer = function (function_name, timer_type, time, days, data)
+		local path = build_path(timer_type, time, days)
+		if (_triggers[path] == nil) then
+			_triggers[path] = {}
+		end
+		VeraMock:log("CORE  [luup.call_timer] Register timer" ..
+								" - type:'" .. tostring(timer_type) .. "'" .. 
+								" - time:'" .. tostring(time) .. "'" ..
+								" - days:'" ..  tostring(days) .. "'" ..
+								" - data:'" .. tostring(data) .. "'" ..
+								" - callback function:'" .. function_name .. "'", 4)
+		if (type(_G[function_name]) == "function") then
+			table.insert(_triggers[path], wrapAnonymousCallback(function ()
+				VeraMock:log("CORE  [luup.call_timer] Call '" .. function_name .. "' with data '" .. data .. "'", 1)
+				_G[function_name](data)
+			end))
+		else
+			VeraMock:log("CORE  [luup.call_timer] '" .. function_name .. "' is not a function", 1)
+		end
 	end
 
 	luup.is_ready = function (device)
@@ -190,12 +208,7 @@ local luup = {
 		if (triggers ~= nil) then
 			for i, function_name in ipairs(triggers) do
 				VeraMock:log("CORE  [luup.variable_set] Call watcher function '" .. function_name .. "'", 4)
-				local watcherFunction = _G[function_name]
-				if (type(watcherFunction) == "function") then
-					watcherFunction(device, service, variable, oldValue, value)
-				else
-					VeraMock:log("CORE  [luup.variable_set] '" .. function_name .. "' is not a function", 1)
-				end
+				_G[function_name](device, service, variable, oldValue, value)
 			end
 		end
 	end
@@ -205,11 +218,16 @@ local luup = {
 		if (_triggers[path] == nil) then
 			_triggers[path] = {}
 		end
-		VeraMock:log("CORE  [luup.variable_watch] Register watch - device:#" .. tostring(device) .. "-'" .. get_device_name(device) .. "'" .. 
+		VeraMock:log("CORE  [luup.variable_watch] Register watch" ..
+								" - device:#" .. tostring(device) .. "-'" .. get_device_name(device) .. "'" .. 
 								" - service:'" .. service .. "'" ..
 								" - variable:'" ..  variable .. "'" ..
 								" - callback function:'" .. function_name .. "'", 4)
-		table.insert(_triggers[path], function_name)
+		if (type(_G[function_name]) == "function") then
+			table.insert(_triggers[path], function_name)
+		else
+			VeraMock:log("CORE  [luup.variable_watch] '" .. function_name .. "' is not a function", 1)
+		end
 	end
 
 	luup.device_supports_service = function (service, device)
@@ -272,14 +290,25 @@ end
 	end
 
 	-- Add a device
-	function VeraMock:addDevice (id, device)
+	function VeraMock:addDevice (id, device, acceptDuplicates)
 		if (type(id) == "table") then
 			-- The device ID is not passed
 			device = id
-			id = table.getn(luup.devices) + 1
+			local isFound = false
+			if not acceptDuplicates then
+				for i, existingDevice in ipairs(luup.devices) do
+					if (existingDevice.description == device.description) then
+						isFound = true
+						id = i
+					end
+				end
+			end
+			if not isFound then
+				id = table.getn(luup.devices) + 1
+			end
 		end
 		assert("table" == type(device), "The device is not defined")
-		if (nil == device.description) then
+		if (device.description == nil) then
 			device.description = "not defined"
 		end
 		if (self.verbosity >= 1) then
@@ -332,7 +361,7 @@ end
 
 	-- Run until all triggers are launched
 	function VeraMock:run ()
-		self:log("Run until all triggers are launched", 1)
+		self:log("BEGIN - Run until all triggers are launched", 1)
 		while true do
 			local n = table.getn(_threads)
 			if (n == 0) then
@@ -353,6 +382,7 @@ end
 				end
 			end
 		end
+		self:log("END - Run is done", 1)
 		assert(table.getn(_threads) == 0, "ERROR - At least one thread remain")
 	end
 
@@ -381,6 +411,26 @@ end
 			self:log("WARNING - " .. tostring(table.getn(_threads)) .. " thread(s) remain from previous run", 1)
 			self:log("Reset threads", 1)
 			_threads = {}
+		end
+	end
+
+	-- Trigger timer
+	function VeraMock:triggerTimer (timerType, time, days)
+		local path = build_path(timerType, time, days)
+		-- Triggers linked to this timer
+		local triggers = _triggers[path]
+		if (triggers ~= nil) then
+			for i, function_name in ipairs(triggers) do
+				self:log("triggerTimer - Call watcher function '" .. function_name .. "'", 50)
+				local watcherFunction = _G[function_name]
+				if (type(watcherFunction) == "function") then
+					watcherFunction(data)
+				else
+					luup.log("triggerTimer - '" .. function_name .. "' is not a function", 2)
+				end
+			end
+		else
+			luup.log("No callback linked to this event", 1)
 		end
 	end
 
