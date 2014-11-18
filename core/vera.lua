@@ -291,10 +291,10 @@ end
 
 	-- Add a device
 	function VeraMock:addDevice (id, device, acceptDuplicates)
+		local isFound = false
 		if (type(id) == "table") then
 			-- The device ID is not passed
 			device = id
-			local isFound = false
 			if not acceptDuplicates then
 				for i, existingDevice in ipairs(luup.devices) do
 					if (existingDevice.description == device.description) then
@@ -312,7 +312,11 @@ end
 			device.description = "not defined"
 		end
 		if (self.verbosity >= 1) then
-			print("[VeraMock:addDevice] Add device #" .. tostring(id) .. "-'" .. tostring(device.description) .. "'")
+			if not isFound then
+				print("[VeraMock:addDevice] Add device #" .. tostring(id) .. "-'" .. tostring(device.description) .. "'")
+			else
+				print("[VeraMock:addDevice] Device #" .. tostring(id) .. "-'" .. tostring(device.description) .. "' already added")
+			end
 		end
 		luup.devices[id] = device
 	end
