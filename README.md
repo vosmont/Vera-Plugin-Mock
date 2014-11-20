@@ -1,6 +1,6 @@
 # Vera-Plugin-Mock
 
-Mock for local testing **outside** of Vera.
+Mock for local testing **outside** of Vera and debug your LUA scripts.
 
 It implements main core functions. See MicasaVerde wiki for more description of the luup functions and variables.
 http://wiki.micasaverde.com/index.php/Luup_Lua_extensions
