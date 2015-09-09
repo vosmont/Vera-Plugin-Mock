@@ -9,6 +9,8 @@
 -- Homepage : https://github.com/vosmont/Vera-Plugin-Mock
 -- ------------------------------------------------------------
 -- Changelog :
+-- 0.0.8 Add milliseconds in log
+--       Add ability to watch service or all devices
 -- 0.0.7 Add "luup.call_timer"
 -- 0.0.6 Add some service actions
 --       Add response callback for luup.inet.wget
@@ -31,7 +33,7 @@
 -- ------------------------------------------------------------
 
 print("")
-print("[VeraMock] LUA interpreter: " .. _VERSION)
+print("[VeraMock] LUA interpreter : " .. _VERSION)
 assert(_VERSION == "Lua 5.1", "Vera LUA core is in version 5.1")
 print("")
 
@@ -39,7 +41,7 @@ local json = require("json")
 
 local VeraMock = {
 	_DESCRIPTION = "Mock for local testing outside of Vera",
-	_VERSION = "0.0.6",
+	_VERSION = "0.0.8",
 	verbosity = 0
 }
 
@@ -56,13 +58,19 @@ local _lastUpdates = {}
 local _services = {}
 local _actions = {}
 local _urls = {}
-local _startTime = os.time()
+--local _startTime = os.time()
+local _startTime = os.clock()
 
 local function build_path (...)
 	local path = ""
-	--for i,v in ipairs(arg) do
-	for i,v in ipairs({...}) do -- Lua 5.2
-		path = path .. (i > 1 and ";" or "") .. tostring(v)
+	for i, v in ipairs({...}) do -- Lua 5.2
+		if (v ~= nil) then
+			if (path == "") then
+				path = tostring(v)
+			else
+				path = path .. ";" .. tostring(v)
+			end
+		end
 	end
 	return path
 end
@@ -76,6 +84,15 @@ local function get_device_name (deviceId)
 		return name
 	else
 		return ""
+	end
+end
+
+local function tableConcat (target, source)
+	if ((type(target) ~= "table") or (type(source) ~= "table")) then
+		return false
+	end
+	for i, value in ipairs(source) do
+		table.insert(target, value)
 	end
 end
 
@@ -104,7 +121,7 @@ local luup = {
 	end
 
 	luup.task = function (message, status, description, handle)
-		VeraMock:log("CORE  [luup.task] Module: '" .. description .. "' - State: '" .. message .. "' - Status: " .. status, 1)
+		VeraMock:log("CORE  [luup.task] Module:'" .. description .. "' - State:'" .. message .. "' - Status:'" .. status .. "'", 1)
 		return 1
 	end
 
@@ -158,12 +175,12 @@ local luup = {
 	end
 
 	luup.is_ready = function (device)
-		VeraMock:log("CORE  [luup.is_ready] device #" .. tostring(device) .. "-'" .. get_device_name(device) .. "' is ready", 4)
+		VeraMock:log("CORE  [luup.is_ready] device #" .. tostring(device) .. "('" .. get_device_name(device) .. ")' is ready", 4)
 		return true
 	end
 
 	luup.call_action = function (service, action, arguments, device)
-		VeraMock:log("CORE  [luup.call_action] device:#" .. tostring(device) .. "-'" .. get_device_name(device) .. "'" .. 
+		VeraMock:log("CORE  [luup.call_action] device:#" .. tostring(device) .. "(" .. get_device_name(device) .. ")" .. 
 											" - service:'" .. service .. "'" ..
 											" - action:'" ..  action .. "'" ..
 											" - arguments:'" .. json.encode(arguments) .. "'", 4)
@@ -185,7 +202,7 @@ local luup = {
 		local path = build_path(service, variable, device)
 		local value = _values[path]
 		local lastUpdate = _lastUpdates[path] or 0
-		VeraMock:log("CORE  [luup.variable_get] device:#" .. tostring(device) .. "-'" .. get_device_name(device) .. "'" ..
+		VeraMock:log("CORE  [luup.variable_get] device:#" .. tostring(device) .. "(" .. get_device_name(device) .. ")" ..
 											" - service:'" .. service .. "'" ..
 											" - variable:'" ..  variable .. "'" ..
 											" - value:'" .. tostring(value) .. "'", 4)
@@ -199,17 +216,18 @@ local luup = {
 		_values[path] = value
 		_lastUpdates[path] = os.time()
 		_services[build_path(service, device)] = true
-		VeraMock:log("CORE  [luup.variable_set] device:#" .. tostring(device) .. "-'" .. get_device_name(device) .. "'" .. 
-											" - service:'" .. service .. "'" ..
-											" - variable:'" ..  variable .. "'" ..
+		VeraMock:log("CORE  [luup.variable_set] device:#" .. tostring(device) .. "(" .. get_device_name(device) .. ")" .. 
+											" - service:'" .. tostring(service) .. "'" ..
+											" - variable:'" ..  tostring(variable) .. "'" ..
 											" - value:'" .. tostring(oldValue) .. "' => '" .. tostring(value) .. "'", 4)
-		-- triggers
-		local triggers = _triggers[path]
-		if (triggers ~= nil) then
-			for i, function_name in ipairs(triggers) do
-				VeraMock:log("CORE  [luup.variable_set] Call watcher function '" .. function_name .. "'", 4)
-				_G[function_name](device, service, variable, oldValue, value)
-			end
+		-- Triggers service/variable/device
+		local triggers = {}
+		tableConcat(triggers, _triggers[path])
+		tableConcat(triggers, _triggers[build_path(service, variable, nil)])
+		tableConcat(triggers, _triggers[build_path(service, nil, nil)])
+		for i, function_name in ipairs(triggers) do
+			VeraMock:log("CORE  [luup.variable_set] Call watcher function '" .. tostring(function_name) .. "'", 4)
+			_G[function_name](device, service, variable, oldValue, value)
 		end
 	end
 
@@ -219,11 +237,12 @@ local luup = {
 			_triggers[path] = {}
 		end
 		VeraMock:log("CORE  [luup.variable_watch] Register watch" ..
-								" - device:#" .. tostring(device) .. "-'" .. get_device_name(device) .. "'" .. 
-								" - service:'" .. service .. "'" ..
-								" - variable:'" ..  variable .. "'" ..
-								" - callback function:'" .. function_name .. "'", 4)
+								" - device: #" .. tostring(device) .. "(" .. get_device_name(device) .. ")" .. 
+								" - service: '" .. tostring(service) .. "'" ..
+								" - variable: '" ..  tostring(variable) .. "'" ..
+								" - callback function: '" .. tostring(function_name) .. "'", 4)
 		if (type(_G[function_name]) == "function") then
+			-- No check to see if function_name is already registred, as Vera does not do this
 			table.insert(_triggers[path], function_name)
 		else
 			VeraMock:log("CORE  [luup.variable_watch] '" .. function_name .. "' is not a function", 1)
@@ -232,10 +251,10 @@ local luup = {
 
 	luup.device_supports_service = function (service, device)
 		if (_services[build_path(service, device)]) then
-			VeraMock:log("CORE  [luup.device_supports_service] Device:#" .. tostring(device) .. "-'" .. get_device_name(device) .. "' supports service '" .. service .. "'", 4)
+			VeraMock:log("CORE  [luup.device_supports_service] Device:#" .. tostring(device) .. "(" .. get_device_name(device) .. ") supports service '" .. service .. "'", 4)
 			return true
 		else
-			VeraMock:log("CORE  [luup.device_supports_service] Device:#" .. tostring(device) .. "-'" .. get_device_name(device) .. "' doesn't support service '" .. service .. "'", 4)
+			VeraMock:log("CORE  [luup.device_supports_service] Device:#" .. tostring(device) .. "(" .. get_device_name(device) .. ") doesn't support service '" .. service .. "'", 4)
 			return false
 		end
 	end
@@ -356,8 +375,15 @@ end
 		assert("string" == type(message))
 		lvl = lvl or 1
 		if (self.verbosity >= lvl) then
-			local elapsedTime = os.difftime(os.time() - _startTime)
-			local formatedTime = string.format("%02d:%02d", math.floor(elapsedTime / 60), (elapsedTime % 60))
+			--local elapsedTime = os.difftime(os.time() - _startTime)
+			local elapsedTime, milliseconds = math.modf(os.clock() - _startTime)
+			if (milliseconds == 0) then 
+				milliseconds = "000"
+			else
+				milliseconds = tostring(milliseconds):sub(3, 5)
+				milliseconds = milliseconds .. string.rep("0", 3 - #milliseconds)
+			end
+			local formatedTime = string.format("%02d:%02d", math.floor(elapsedTime / 60), (elapsedTime % 60)) .. "." .. milliseconds
 			local formatedThreadId = string.format("%03d", _threadCurrentId)
 			print("[VeraMock] " .. formatedThreadId .. "-" .. formatedTime .. "-" .. message)
 		end
@@ -403,12 +429,10 @@ end
 		_triggers = {}
 	end
 
-	-- Reset mock
-	function VeraMock:reset ()
-		_startTime = os.time()
-		self:log("Reset VeraMock", 1)
-		self:resetValues()
-		self:resetTriggers()
+	-- Reset threads
+	function VeraMock:resetThreads ()
+		self:log("Reset threads", 1)
+		_startTime = os.clock()
 		_threadLastId = 0
 		_threadCurrentId = 0
 		if (table.getn(_threads) > 0) then
@@ -416,6 +440,14 @@ end
 			self:log("Reset threads", 1)
 			_threads = {}
 		end
+	end
+
+	-- Reset mock
+	function VeraMock:reset ()
+		self:log("Reset VeraMock", 1)
+		self:resetValues()
+		self:resetTriggers()
+		self:resetThreads()
 	end
 
 	-- Trigger timer
