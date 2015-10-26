@@ -8,28 +8,35 @@
 -- ------------------------------------------------------------
 -- Homepage : https://github.com/vosmont/Vera-Plugin-Mock
 -- ------------------------------------------------------------
+--[[
 -- Changelog :
--- 0.0.8 Add milliseconds in log
---       Add ability to watch service or all devices
--- 0.0.7 Add "luup.call_timer"
--- 0.0.6 Add some service actions
---       Add response callback for luup.inet.wget
---       Add threadId and timestamps in log
---       Add reset threads
--- 0.0.5 Add LUA interpreter version verification
---       Add some new reset functions
---       Add last update on "luup.variable_get"
---       Use json.lua
--- 0.0.4 Add verbosity level
---       Fix a bug on no handling of error in threads
---       Convert value in String in luup.variable_set
--- 0.0.3 Fix a bug on "luup.variable_set" with trigger and moduleId
---       Fix a bug on "VeraMock.run" with moduleId
--- 0.0.2 Add log level and some logs
---       Add "luup.inet.wget" and url management
---       Add action management
---       Fix a bug on "VeraMock.run" and add threadId
--- 0.0.1 First release
+ 0.0.9 Add "luup.register_handler"
+       Replace "os.time" and "os.date"
+       Fix a bug in thread with error handling
+       Fix a bug with milliseconds in log
+       Catch errors in "variable_set"
+ 0.0.8 Add milliseconds in log
+       Add ability to watch service or all devices
+ 0.0.7 Add "luup.call_timer"
+ 0.0.6 Add some service actions
+       Add response callback for luup.inet.wget
+       Add threadId and timestamps in log
+       Add reset threads
+ 0.0.5 Add LUA interpreter version verification
+       Add some new reset functions
+       Add last update on "luup.variable_get"
+       Use json.lua
+ 0.0.4 Add verbosity level
+       Fix a bug on no handling of error in threads
+       Convert value in String in luup.variable_set
+ 0.0.3 Fix a bug on "luup.variable_set" with trigger and moduleId
+       Fix a bug on "VeraMock.run" with moduleId
+ 0.0.2 Add log level and some logs
+       Add "luup.inet.wget" and url management
+       Add action management
+       Fix a bug on "VeraMock.run" and add threadId
+ 0.0.1 First release
+--]]
 -- ------------------------------------------------------------
 
 print("")
@@ -38,12 +45,44 @@ assert(_VERSION == "Lua 5.1", "Vera LUA core is in version 5.1")
 print("")
 
 local json = require("json")
+local string = string
 
 local VeraMock = {
 	_DESCRIPTION = "Mock for local testing outside of Vera",
-	_VERSION = "0.0.8",
+	_VERSION = "0.0.9",
 	verbosity = 0
 }
+
+-- *****************************************************
+-- OS hook
+-- *****************************************************
+
+local _deltaTime = nil
+local _dayOfWeek, _dayOfMonth = nil, nil
+
+local osTimeFunction = os.time
+local osDateFunction = os.date
+
+_G.os.time = function (t)
+	local time = osTimeFunction(t)
+	if (_deltaTime ~= nil) then
+		time = time - _deltaTime
+	end
+	return time
+end
+
+_G.os.date = function (dateFormat, t)
+	if (t == nil) then
+		t = os.time()
+	end
+	if (_dayOfWeek ~= nil) then
+		dateFormat = string.gsub(dateFormat, "%%w", tostring(_dayOfWeek))
+	end
+	if (_dayOfMonth ~= nil) then
+		dateFormat = string.gsub(dateFormat, "%%d", tostring(_dayOfMonth))
+	end
+	return osDateFunction(dateFormat, t)
+end
 
 -- *****************************************************
 -- Vera core
@@ -58,8 +97,7 @@ local _lastUpdates = {}
 local _services = {}
 local _actions = {}
 local _urls = {}
---local _startTime = os.time()
-local _startTime = os.clock()
+local _startClock = os.clock()
 
 local function build_path (...)
 	local path = ""
@@ -139,8 +177,12 @@ local luup = {
 					coroutine.yield(t0, function_name, seconds, data)
 				end
 				_threadCurrentId = threadId
-				VeraMock:log("CORE  [luup.call_delay] Delay of " .. tostring(seconds) .. " seconds is reached: call function '" .. function_name .. "' with parameter '" .. tostring(data) .. "'", 4)
-				_G[function_name](data)
+				VeraMock:log("CORE  [luup.call_delay] Delay of " .. tostring(seconds) .. " seconds is reached: call function '" .. function_name .. "' with parameter '" .. tostring(data) .. "'", 3)
+				local status, result = pcall(_G[function_name], data)
+				if not status then
+					VeraMock:log("ERROR " .. result, 1)
+					error(result)
+				end
 				_threadCurrentId = 0
 				VeraMock:log("CORE  <------- Thread #" .. tostring(threadId) .. " finished", 4)
 				return false
@@ -166,7 +208,7 @@ local luup = {
 								" - callback function:'" .. function_name .. "'", 4)
 		if (type(_G[function_name]) == "function") then
 			table.insert(_triggers[path], wrapAnonymousCallback(function ()
-				VeraMock:log("CORE  [luup.call_timer] Call '" .. function_name .. "' with data '" .. data .. "'", 1)
+				VeraMock:log("CORE  [luup.call_timer] Call '" .. function_name .. "' with data '" .. data .. "'", 3)
 				_G[function_name](data)
 			end))
 		else
@@ -214,7 +256,7 @@ local luup = {
 		local oldValue = _values[path]
 		value = tostring(value) -- In Vera, values are always String
 		_values[path] = value
-		_lastUpdates[path] = os.time()
+		_lastUpdates[path] = osTimeFunction()
 		_services[build_path(service, device)] = true
 		VeraMock:log("CORE  [luup.variable_set] device:#" .. tostring(device) .. "(" .. get_device_name(device) .. ")" .. 
 											" - service:'" .. tostring(service) .. "'" ..
@@ -227,7 +269,12 @@ local luup = {
 		tableConcat(triggers, _triggers[build_path(service, nil, nil)])
 		for i, function_name in ipairs(triggers) do
 			VeraMock:log("CORE  [luup.variable_set] Call watcher function '" .. tostring(function_name) .. "'", 4)
-			_G[function_name](device, service, variable, oldValue, value)
+			--_G[function_name](device, service, variable, oldValue, value)
+			local status, result = pcall(_G[function_name], device, service, variable, oldValue, value)
+			if not status then
+				VeraMock:log("ERROR " .. result, 1)
+				error(result)
+			end
 		end
 	end
 
@@ -257,6 +304,10 @@ local luup = {
 			VeraMock:log("CORE  [luup.device_supports_service] Device:#" .. tostring(device) .. "(" .. get_device_name(device) .. ") doesn't support service '" .. service .. "'", 4)
 			return false
 		end
+	end
+
+	luup.register_handler = function (function_name,  request_name)
+		VeraMock:log("CORE  [luup.register_handler] Handler '" .. tostring(function_name) .. "' for '" .. tostring(request_name) .. "'", 4)
 	end
 
 	luup.inet = {
@@ -298,6 +349,25 @@ function wrapAnonymousCallback(callback)
 	return callbackName
 end
 
+function string.split(str, pat)
+	local t = {}  -- NOTE: use {n = 0} in Lua-5.0
+	local fpat = "(.-)" .. pat
+	local last_end = 1
+	local s, e, cap = str:find(fpat, 1)
+	while s do
+		if s ~= 1 or cap ~= "" then
+			table.insert(t,cap)
+		end
+		last_end = e+1
+		s, e, cap = str:find(fpat, last_end)
+	end
+	if last_end <= #str then
+		cap = str:sub(last_end)
+		table.insert(t, cap)
+	end
+	return t
+end
+
 -- *****************************************************
 -- VeraMock module
 -- *****************************************************
@@ -326,7 +396,7 @@ end
 				id = table.getn(luup.devices) + 1
 			end
 		end
-		assert("table" == type(device), "The device is not defined")
+		assert(type(device) == "table", "The device is not defined")
 		if (device.description == nil) then
 			device.description = "not defined"
 		end
@@ -375,23 +445,24 @@ end
 		assert("string" == type(message))
 		lvl = lvl or 1
 		if (self.verbosity >= lvl) then
-			--local elapsedTime = os.difftime(os.time() - _startTime)
-			local elapsedTime, milliseconds = math.modf(os.clock() - _startTime)
-			if (milliseconds == 0) then 
+			local elapsedTime, milliseconds = math.modf(os.clock() - _startClock)
+			if (milliseconds < 0.001) then
 				milliseconds = "000"
 			else
 				milliseconds = tostring(milliseconds):sub(3, 5)
 				milliseconds = milliseconds .. string.rep("0", 3 - #milliseconds)
 			end
-			local formatedTime = string.format("%02d:%02d", math.floor(elapsedTime / 60), (elapsedTime % 60)) .. "." .. milliseconds
+			--local formatedTime = string.format("%02d:%02d", math.floor(elapsedTime / 60), (elapsedTime % 60)) .. "." .. milliseconds
+			local formatedTime = string.format("%03d", elapsedTime) .. "." .. milliseconds
 			local formatedThreadId = string.format("%03d", _threadCurrentId)
-			print("[VeraMock] " .. formatedThreadId .. "-" .. formatedTime .. "-" .. message)
+			print("[VeraMock] " .. formatedThreadId .. " " .. os.date("%X", os.time()) .. " (" .. formatedTime .. ") " .. message)
 		end
 	end
 
 	-- Run until all triggers are launched
 	function VeraMock:run ()
-		self:log("BEGIN - Run until all triggers are launched", 1)
+		--_startClock = os.clock()
+		self:log("*** BEGIN *** Run until all triggers are launched", 1)
 		while true do
 			local n = table.getn(_threads)
 			if (n == 0) then
@@ -412,7 +483,7 @@ end
 				end
 			end
 		end
-		self:log("END - Run is done", 1)
+		self:log("*** END *** Run is done", 1)
 		assert(table.getn(_threads) == 0, "ERROR - At least one thread remain")
 	end
 
@@ -432,7 +503,9 @@ end
 	-- Reset threads
 	function VeraMock:resetThreads ()
 		self:log("Reset threads", 1)
-		_startTime = os.clock()
+		_startClock = os.clock()
+		_deltaTime = nil
+		_dayOfWeek, _dayOfMonth = nil, nil
 		_threadLastId = 0
 		_threadCurrentId = 0
 		if (table.getn(_threads) > 0) then
@@ -457,7 +530,7 @@ end
 		local triggers = _triggers[path]
 		if (triggers ~= nil) then
 			for i, function_name in ipairs(triggers) do
-				self:log("triggerTimer - Call watcher function '" .. function_name .. "'", 50)
+				self:log("triggerTimer - Call watcher function '" .. function_name .. "'", 3)
 				local watcherFunction = _G[function_name]
 				if (type(watcherFunction) == "function") then
 					watcherFunction(data)
@@ -468,6 +541,40 @@ end
 		else
 			luup.log("No callback linked to this event", 1)
 		end
+	end
+
+	-- Set current time from a date "HH:MM:SS"
+	function VeraMock:setDate (fakeDate)
+		self:log("Set time : " .. tostring(fakeDate), 1)
+		local now = osTimeFunction()
+		local aTime = string.split(fakeDate, ":")
+		_deltaTime = os.difftime(
+			now,
+			osTimeFunction({
+				year  = os.date("%Y", now),
+				month = os.date("%m", now),
+				day   = os.date("%d", now),
+				hour  = aTime[1],
+				min   = aTime[2],
+				sec   = aTime[3]
+			})
+		)
+	end
+
+	-- 
+	function VeraMock:setDayOfWeek (fakeDayOfWeek)
+		self:log("Set day of week : " .. tostring(fakeDayOfWeek), 1)
+		_dayOfWeek = fakeDayOfWeek
+	end
+	function VeraMock:setDayOfMonth (fakeDayOfMonth)
+		self:log("Set day of month : " .. tostring(fakeDayOfMonth), 1)
+		_dayOfMonth = fakeDayOfMonth
+	end
+
+	-- Set current time
+	function VeraMock:setTime (fakeTime)
+		self:log("Set time : " .. tostring(fakeTime), 1)
+		_deltaTime = os.difftime(osTimeFunction(), tonumber(fakeTime))
 	end
 
 -- *****************************************************
