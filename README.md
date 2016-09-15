@@ -1,3 +1,6 @@
+## **DEPRECATED** Use instead Unit Test on [openLuup](https://github.com/akbooer/openLuup)
+Examples in [UnitTests of the plugin RulesEngine](https://github.com/vosmont/Vera-Plugin-RulesEngine/tree/master/test)
+
 # Vera-Plugin-Mock
 
 Mock for local testing **outside** of Vera and debugging your LUA scripts.
